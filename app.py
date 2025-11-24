@@ -1,0 +1,81 @@
+import streamlit as st
+import pandas as pd
+import requests
+import plotly.express as px
+from datetime import datetime
+
+st.set_page_config(page_title="Weather Dashboard", layout="wide")
+st.title("🌦️ Dashboard สภาพอากาศรายเมือง")
+
+cities = {
+    "Bangkok": {"lat": 13.7563, "lon": 100.5018},
+    "Chiang Mai": {"lat": 18.7811, "lon": 98.9817},
+    "Phuket": {"lat": 7.8804, "lon": 98.3923},
+    "Nakhon Ratchasima": {"lat": 14.9751, "lon": 102.0987},
+    "London": {"lat": 51.5074, "lon": -0.1278},
+    "Tokyo": {"lat": 35.6895, "lon": 139.6917}
+}
+
+selected_city = st.selectbox("เลือกเมืองที่ต้องการดูข้อมูล:", list(cities.keys()))
+coords = cities[selected_city]
+
+col1, col2 = st.columns(2)
+with col1:
+    start_date = st.date_input("วันที่เริ่มต้น", datetime.now())
+with col2:
+    end_date = st.date_input("วันที่สิ้นสุด", datetime.now())
+
+@st.cache_data(ttl=600)
+def get_weather_data(lat, lon, start, end):
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,rain,surface_pressure",
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "timezone": "auto"
+    }
+    response = requests.get(url, params=params)
+    data = response.json()
+    hourly = data['hourly']
+    df = pd.DataFrame({
+        "Time": pd.to_datetime(hourly['time']),
+        "Temperature (°C)": hourly['temperature_2m'],
+        "Humidity (%)": hourly['relative_humidity_2m'],
+        "Wind Speed (km/h)": hourly['wind_speed_10m'],
+        "Rain (mm)": hourly['rain'],
+        "Pressure (hPa)": hourly['surface_pressure']
+    })
+    return df
+
+try:
+    df = get_weather_data(coords['lat'], coords['lon'], start_date, end_date)
+
+    st.subheader(f"สถานะล่าสุด ณ {selected_city}")
+    latest = df.iloc[-1]
+    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("อุณหภูมิ", f"{latest['Temperature (°C)']} °C")
+    m2.metric("ความชื้น", f"{latest['Humidity (%)']} %")
+    m3.metric("แรงลม", f"{latest['Wind Speed (km/h)']} km/h")
+    m4.metric("ปริมาณฝน", f"{latest['Rain (mm)']} mm")
+
+    st.subheader("📈 กราฟแสดงแนวโน้ม")
+    graph_type = st.radio("เลือกข้อมูลกราฟ:", ["Temperature (°C)", "Humidity (%)", "Wind Speed (km/h)"], horizontal=True)
+    fig = px.line(df, x="Time", y=graph_type, title=f"{graph_type} over time in {selected_city}")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📋 ตารางข้อมูลดิบ")
+    st.dataframe(df, use_container_width=True)
+
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="💾 ดาวน์โหลดข้อมูลเป็น CSV",
+        data=csv,
+        file_name=f'weather_{selected_city}_{start_date}_{end_date}.csv',
+        mime='text/csv',
+    )
+
+except Exception as e:
+    st.error(f"Error: {e}")
