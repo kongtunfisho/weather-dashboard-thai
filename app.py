@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import plotly.express as px
 from datetime import datetime, timedelta
+from io import BytesIO # จำเป็นสำหรับการโหลดไฟล์ Excel
 
 # 1. ตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="Thailand Weather Center", layout="wide", page_icon="🌤️")
@@ -37,10 +38,14 @@ st.markdown("""
             font-weight: bold;
             color: white;
         }
+        /* ปรับสี Radio Button ให้มองเห็นชัด */
+        .stRadio > label {
+            color: white !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. ข้อมูลจังหวัด (ตัวอย่างบางส่วน)
+# 2. ข้อมูล 77 จังหวัด (ตัวอย่างบางส่วน - คุณสามารถนำรายชื่อจังหวัดเต็มๆ จากโค้ดก่อนหน้ามาใส่ตรงนี้ได้เลย)
 provinces = {
     "Bangkok": {"lat": 13.7563, "lon": 100.5018}, "Chiang Mai": {"lat": 18.7904, "lon": 98.9847},
     "Phuket": {"lat": 7.8804, "lon": 98.3923}, "Khon Kaen": {"lat": 16.4322, "lon": 102.8236},
@@ -63,7 +68,7 @@ def get_moon_phase(date):
     elif phase_index < 0.78: return "🌗 จันทร์ครึ่งดวงหลัง"
     else: return "🌘 ข้างแรม"
 
-# 3. อัปเกรดฟังก์ชัน API ให้ดึงข้อมูลย้อนหลัง (past_days)
+# 3. อัปเกรดฟังก์ชัน API
 @st.cache_data(ttl=1800)
 def get_weather_full(lat, lon):
     url = "https://api.open-meteo.com/v1/forecast"
@@ -74,7 +79,7 @@ def get_weather_full(lat, lon):
         "hourly": "temperature_2m,relative_humidity_2m,dew_point_2m,uv_index,visibility,wind_speed_10m,surface_pressure",
         "daily": "temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max",
         "timezone": "Asia/Bangkok",
-        "past_days": 92  # ดึงข้อมูลย้อนหลังได้สูงสุด 92 วันสำหรับ Free Tier
+        "past_days": 92
     }
     response = requests.get(url, params=params)
     return response.json()
@@ -92,16 +97,36 @@ current = data['current']
 daily = data['daily']
 hourly = data['hourly']
 
-# เตรียมตัวแปร UI
-today_max = daily['temperature_2m_max'][0] if daily['temperature_2m_max'] else "-"
-today_min = daily['temperature_2m_min'][0] if daily['temperature_2m_min'] else "-"
-uv_today = daily['uv_index_max'][0] if daily['uv_index_max'] else "-"
-sunrise = daily['sunrise'][0][-5:]
-sunset = daily['sunset'][0][-5:]
+# --- FIX 1: แก้ปัญหาค่า None โดยหา Index ของวันปัจจุบันให้ถูกต้อง ---
+today_str = datetime.now().strftime("%Y-%m-%d")
+
+# หาตำแหน่งของ "วันนี้" ในลิสต์วันที่ที่ API ส่งมา
+if today_str in daily['time']:
+    today_idx = daily['time'].index(today_str)
+else:
+    today_idx = -1 # ถ้าไม่เจอให้เอาตัวสุดท้าย
+
+today_max = daily['temperature_2m_max'][today_idx]
+today_min = daily['temperature_2m_min'][today_idx]
+uv_today = daily['uv_index_max'][today_idx]
+sunrise = daily['sunrise'][today_idx][-5:]
+sunset = daily['sunset'][today_idx][-5:]
+
+# ข้อมูลรายชั่วโมง (Current)
 current_hour_index = datetime.now().hour 
-# หมายเหตุ: index อาจคลาดเคลื่อนเล็กน้อยในข้อมูลผสม past_days แต่ใช้เพื่อแสดงผลคร่าวๆได้
-dew_point = hourly['dew_point_2m'][-24:][current_hour_index] if len(hourly['dew_point_2m']) > 0 else 0
-visibility = hourly['visibility'][-24:][current_hour_index] / 1000 
+# เนื่องจาก hourly ข้อมูลเยอะมาก เราใช้ index ล่าสุดของ list (ซึ่งคือปัจจุบัน/อนาคตใกล้ๆ)
+# วิธีที่แม่นยำคือหา index ของชั่วโมงปัจจุบันจาก Time List ทั้งหมด
+all_hourly_times = hourly['time']
+current_hour_iso = datetime.now().strftime("%Y-%m-%dT%H:00")
+try:
+    # พยายามหาข้อมูลชั่วโมงปัจจุบันเป๊ะๆ
+    hourly_now_idx = all_hourly_times.index(current_hour_iso)
+except:
+    # ถ้าหาไม่เจอ (อาจจะเพราะเรื่อง Timezone) ให้เอา index รองสุดท้าย (ปัจจุบัน)
+    hourly_now_idx = -24 + datetime.now().hour # ประมาณการคร่าวๆ จากท้ายตาราง
+
+dew_point = hourly['dew_point_2m'][hourly_now_idx]
+visibility = hourly['visibility'][hourly_now_idx] / 1000 
 moon_phase_text = get_moon_phase(datetime.now())
 
 # --- ส่วนแสดงผล Card ด้านบน ---
@@ -117,7 +142,7 @@ with col_main:
                 <div class="big-temp">{current['temperature_2m']}°</div>
                 <div style="margin-left: 20px;">
                     <div style="font-size: 18px; color: #ccc;">รู้สึกเหมือน {current['apparent_temperature']}°</div>
-                    <div style="font-weight: bold;">-- / {today_min}°</div> 
+                    <div style="font-weight: bold;">{today_max}° / {today_min}°</div> 
                 </div>
             </div>
             <div style="margin-top: 10px;">
@@ -145,27 +170,24 @@ with col_radar:
     windy_url = f"https://embed.windy.com/embed2.html?lat={coords['lat']}&lon={coords['lon']}&detailLat={coords['lat']}&detailLon={coords['lon']}&width=650&height=450&zoom=10&level=surface&overlay=radar&product=radar&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1"
     st.components.v1.iframe(windy_url, height=500, scrolling=False)
 
-# --- 🔥 ส่วนกราฟที่ปรับปรุงใหม่ (The New Graph Section) ---
+# --- ส่วนกราฟและ Export (ปรับปรุงใหม่) ---
 st.write("---")
 st.subheader("📈 กราฟแสดงข้อมูลสภาพอากาศ")
 
-# 1. สร้าง Dropdown สำหรับเลือก
 col_opt1, col_opt2 = st.columns(2)
 with col_opt1:
-    # เลือกตัวแปรที่จะดู
     graph_metric = st.selectbox(
         "📦 เลือกข้อมูลที่ต้องการแสดง:",
         ["อุณหภูมิ (Temperature)", "ความชื้น (Humidity)", "แรงลม (Wind Speed)", "ความกดอากาศ (Pressure)", "UV Index"]
     )
 
 with col_opt2:
-    # เลือกช่วงเวลา (Time Range)
     time_range = st.selectbox(
         "⏳ เลือกช่วงเวลา:",
         ["24 ชั่วโมงที่ผ่านมา (รายชั่วโมง)", "7 วันที่ผ่านมา (รายชั่วโมง)", "30 วันที่ผ่านมา (รายวัน)", "3 เดือนที่ผ่านมา (รายวัน)"]
     )
 
-# 2. เตรียมข้อมูลดิบทั้งหมดใส่ DataFrame
+# เตรียมข้อมูล
 df_full = pd.DataFrame({
     'Time': pd.to_datetime(hourly['time']),
     'Temperature': hourly['temperature_2m'],
@@ -174,68 +196,78 @@ df_full = pd.DataFrame({
     'Pressure': hourly['surface_pressure'],
     'UV Index': hourly['uv_index']
 })
-df_full.set_index('Time', inplace=True) # ตั้ง Time เป็น Index เพื่อให้ตัดต่อเวลาได้ง่าย
+df_full.set_index('Time', inplace=True)
 
-# 3. Logic การกรองข้อมูลตามช่วงเวลา
+# --- FIX 2: ตัดข้อมูลอนาคตออก (Graph Clipping) ---
 now = datetime.now()
-df_plot = pd.DataFrame() # ตัวแปรสำหรับเก็บข้อมูลที่จะพลอตกราฟ
+df_historical = df_full[df_full.index <= now] # กรองเอาเฉพาะเวลาที่เป็นอดีตถึงปัจจุบันเท่านั้น
+
+df_plot = pd.DataFrame()
 
 if "24 ชั่วโมง" in time_range:
     start_time = now - timedelta(hours=24)
-    df_plot = df_full[start_time:] # ตัดข้อมูลตั้งแต่ 24 ชม. ที่แล้วถึงปัจจุบัน
-    x_axis_format = "%H:%M" # รูปแบบแกน X
+    # ตัดข้อมูลตั้งแต่ 24 ชม. ที่แล้ว ถึง ปัจจุบัน (ไม่เอาอนาคต)
+    df_plot = df_historical[start_time:] 
 
 elif "7 วัน" in time_range:
     start_time = now - timedelta(days=7)
-    df_plot = df_full[start_time:]
-    x_axis_format = "%d %b"
+    df_plot = df_historical[start_time:]
 
 elif "30 วัน" in time_range:
     start_time = now - timedelta(days=30)
-    # Resample เป็นรายวัน (หาค่าเฉลี่ยของแต่ละวัน) เพื่อให้กราฟดูง่าย
-    df_plot = df_full[start_time:].resample('D').mean() 
-    x_axis_format = "%d %b"
+    df_plot = df_historical[start_time:].resample('D').mean() 
 
 elif "3 เดือน" in time_range:
     start_time = now - timedelta(days=90)
-    # Resample เป็นรายวัน
-    df_plot = df_full[start_time:].resample('D').mean()
-    x_axis_format = "%d %b"
+    df_plot = df_historical[start_time:].resample('D').mean()
 
-# 4. Logic การเลือกสีและข้อมูลตาม Metric
-y_col = ""
-color_hex = ""
+# เลือกสี
+color_hex = "#FFC107"
+y_col = "Temperature"
+if "ความชื้น" in graph_metric: y_col, color_hex = "Humidity", "#00B0FF"
+elif "แรงลม" in graph_metric: y_col, color_hex = "Wind Speed", "#00E676"
+elif "ความกดอากาศ" in graph_metric: y_col, color_hex = "Pressure", "#FF4081"
+elif "UV" in graph_metric: y_col, color_hex = "UV Index", "#E040FB"
 
-if "อุณหภูมิ" in graph_metric:
-    y_col = "Temperature"
-    color_hex = "#FFC107" # สีเหลืองทอง
-elif "ความชื้น" in graph_metric:
-    y_col = "Humidity"
-    color_hex = "#00B0FF" # สีฟ้าสด
-elif "แรงลม" in graph_metric:
-    y_col = "Wind Speed"
-    color_hex = "#00E676" # สีเขียว
-elif "ความกดอากาศ" in graph_metric:
-    y_col = "Pressure"
-    color_hex = "#FF4081" # สีชมพู
-elif "UV" in graph_metric:
-    y_col = "UV Index"
-    color_hex = "#E040FB" # สีม่วง
-
-# 5. วาดกราฟ
 if not df_plot.empty:
     fig = px.area(df_plot, x=df_plot.index, y=y_col, 
                   title=f"แนวโน้ม{graph_metric} - {time_range}",
                   color_discrete_sequence=[color_hex])
-    
-    # ตกแต่งกราฟให้เข้ากับ Dark Mode
-    fig.update_layout(
-        plot_bgcolor="rgba(0,0,0,0)", 
-        paper_bgcolor="rgba(0,0,0,0)", 
-        font_color="white",
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=True, gridcolor="#444")
-    )
+    fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white", xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor="#444"))
     st.plotly_chart(fig, use_container_width=True)
+
+    # --- FIX 3: ส่วน Export ข้อมูล ---
+    st.write("### 📥 ดาวน์โหลดข้อมูล")
+    col_dl1, col_dl2 = st.columns([1, 3])
+    
+    with col_dl1:
+        file_format = st.radio("เลือกประเภทไฟล์:", ["CSV", "Excel (.xlsx)"])
+    
+    with col_dl2:
+        st.write("") # เว้นบรรทัด
+        st.write("") 
+        if file_format == "CSV":
+            csv = df_plot.to_csv().encode('utf-8')
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name=f'weather_data_{selected_city}.csv',
+                mime='text/csv',
+                type="primary"
+            )
+        else:
+            # Export เป็น Excel
+            buffer = BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_plot.to_excel(writer, sheet_name='Weather Data')
+            
+            st.download_button(
+                label="Download Excel",
+                data=buffer.getvalue(),
+                file_name=f'weather_data_{selected_city}.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                type="primary"
+            )
+
 else:
-    st.warning("กำลังโหลดข้อมูล หรือไม่มีข้อมูลในช่วงเวลานี้...")
+    st.warning("ไม่มีข้อมูลในช่วงเวลานี้")
