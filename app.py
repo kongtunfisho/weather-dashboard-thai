@@ -2,192 +2,210 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-from datetime import datetime, timedelta
-import time
+from datetime import datetime
+import math
 
-# 1. ตั้งค่าหน้า Dashboard
-st.set_page_config(page_title="Thailand Weather Dashboard", layout="wide", page_icon="🌦️")
+# 1. ตั้งค่าหน้าเว็บ
+st.set_page_config(page_title="Thailand Weather Center", layout="wide", page_icon="🌤️")
 
-# CSS ตกแต่งเพิ่มเติมให้ดู Modern ขึ้น
+# CSS ปรับแต่งให้เหมือน Weather.com (การ์ดสีขาว/ดำ ตัวเลขใหญ่)
 st.markdown("""
     <style>
-        .stMetric {
-            background-color: #262730;
+        .main-card {
+            background-color: #1E1E1E;
+            padding: 20px;
+            border-radius: 15px;
+            color: white;
+            margin-bottom: 20px;
+        }
+        .big-temp {
+            font-size: 60px;
+            font-weight: bold;
+        }
+        .sub-text {
+            font-size: 18px;
+            color: #CCCCCC;
+        }
+        .metric-box {
+            background-color: #2B2B2B;
             padding: 15px;
             border-radius: 10px;
-            box-shadow: 2px 2px 10px rgba(0,0,0,0.5);
+            text-align: center;
+            height: 100%;
         }
-        div[data-testid="stMetricValue"] {
-            font-size: 2rem;
-            color: #4DB6AC;
+        .metric-label {
+            font-size: 14px;
+            color: #AAAAAA;
+        }
+        .metric-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: white;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. ข้อมูล 77 จังหวัด (พร้อมพิกัด)
+# 2. ข้อมูลจังหวัด
 provinces = {
-    "Bangkok": {"lat": 13.7563, "lon": 100.5018}, "Amnat Charoen": {"lat": 15.8657, "lon": 104.6258},
-    "Ang Thong": {"lat": 14.5896, "lon": 100.4551}, "Bueng Kan": {"lat": 18.3609, "lon": 103.6464},
-    "Buriram": {"lat": 14.9930, "lon": 103.1029}, "Chachoengsao": {"lat": 13.6904, "lon": 101.0780},
-    "Chai Nat": {"lat": 15.1852, "lon": 100.1251}, "Chaiyaphum": {"lat": 15.8105, "lon": 102.0277},
-    "Chanthaburi": {"lat": 12.6114, "lon": 102.1039}, "Chiang Mai": {"lat": 18.7904, "lon": 98.9847},
-    "Chiang Rai": {"lat": 19.9105, "lon": 99.8406}, "Chonburi": {"lat": 13.3611, "lon": 100.9847},
-    "Chumphon": {"lat": 10.4930, "lon": 99.1800}, "Kalasin": {"lat": 16.4322, "lon": 103.5061},
-    "Kamphaeng Phet": {"lat": 16.4828, "lon": 99.5227}, "Kanchanaburi": {"lat": 14.0228, "lon": 99.5328},
-    "Khon Kaen": {"lat": 16.4322, "lon": 102.8236}, "Krabi": {"lat": 8.0863, "lon": 98.9063},
-    "Lampang": {"lat": 18.2858, "lon": 99.4910}, "Lamphun": {"lat": 18.5748, "lon": 99.0087},
-    "Loei": {"lat": 17.4860, "lon": 101.7223}, "Lopburi": {"lat": 14.7995, "lon": 100.6534},
-    "Mae Hong Son": {"lat": 19.3021, "lon": 97.9654}, "Maha Sarakham": {"lat": 16.1857, "lon": 103.3015},
-    "Mukdahan": {"lat": 16.5434, "lon": 104.7235}, "Nakhon Nayok": {"lat": 14.2069, "lon": 101.2130},
-    "Nakhon Pathom": {"lat": 13.8196, "lon": 100.0373}, "Nakhon Phanom": {"lat": 17.3948, "lon": 104.7695},
-    "Nakhon Ratchasima": {"lat": 14.9751, "lon": 102.0987}, "Nakhon Sawan": {"lat": 15.6987, "lon": 100.1372},
-    "Nakhon Si Thammarat": {"lat": 8.4309, "lon": 99.9631}, "Nan": {"lat": 18.7756, "lon": 100.7730},
-    "Narathiwat": {"lat": 6.4255, "lon": 101.8253}, "Nong Bua Lamphu": {"lat": 17.2029, "lon": 102.4411},
-    "Nong Khai": {"lat": 17.8785, "lon": 102.7413}, "Nonthaburi": {"lat": 13.8621, "lon": 100.5140},
-    "Pathum Thani": {"lat": 14.0208, "lon": 100.5250}, "Pattani": {"lat": 6.8696, "lon": 101.2539},
-    "Phang Nga": {"lat": 8.4509, "lon": 98.5299}, "Phatthalung": {"lat": 7.6172, "lon": 100.0709},
-    "Phayao": {"lat": 19.1662, "lon": 99.9018}, "Phetchabun": {"lat": 16.4253, "lon": 101.1526},
-    "Phetchaburi": {"lat": 13.1128, "lon": 99.9405}, "Phichit": {"lat": 16.4416, "lon": 100.3489},
-    "Phitsanulok": {"lat": 16.8211, "lon": 100.2659}, "Phra Nakhon Si Ayutthaya": {"lat": 14.3532, "lon": 100.5684},
-    "Phrae": {"lat": 18.1446, "lon": 100.1403}, "Phuket": {"lat": 7.8804, "lon": 98.3923},
-    "Prachinburi": {"lat": 14.0509, "lon": 101.3716}, "Prachuap Khiri Khan": {"lat": 11.8256, "lon": 99.7925},
-    "Ranong": {"lat": 9.9658, "lon": 98.6348}, "Ratchaburi": {"lat": 13.5283, "lon": 99.8135},
-    "Rayong": {"lat": 12.6815, "lon": 101.2816}, "Roi Et": {"lat": 16.0538, "lon": 103.6520},
-    "Sa Kaeo": {"lat": 13.8240, "lon": 102.0646}, "Sakon Nakhon": {"lat": 17.1542, "lon": 104.1352},
-    "Samut Prakan": {"lat": 13.5991, "lon": 100.5967}, "Samut Sakhon": {"lat": 13.5475, "lon": 100.2749},
-    "Samut Songkhram": {"lat": 13.4098, "lon": 100.0023}, "Saraburi": {"lat": 14.5289, "lon": 100.9101},
-    "Satun": {"lat": 6.6238, "lon": 100.0674}, "Sing Buri": {"lat": 14.8899, "lon": 100.3957},
-    "Sisaket": {"lat": 15.1186, "lon": 104.3220}, "Songkhla": {"lat": 7.1756, "lon": 100.6143},
-    "Sukhothai": {"lat": 17.0056, "lon": 99.8196}, "Suphan Buri": {"lat": 14.4745, "lon": 100.1277},
-    "Surat Thani": {"lat": 9.1418, "lon": 99.3296}, "Surin": {"lat": 14.8905, "lon": 103.4905},
-    "Tak": {"lat": 16.8837, "lon": 99.1258}, "Trang": {"lat": 7.5563, "lon": 99.6114},
-    "Trat": {"lat": 12.2428, "lon": 102.5175}, "Ubon Ratchathani": {"lat": 15.2448, "lon": 104.8473},
-    "Udon Thani": {"lat": 17.4156, "lon": 102.7872}, "Uthai Thani": {"lat": 15.3835, "lon": 100.0246},
-    "Uttaradit": {"lat": 17.6201, "lon": 100.0993}, "Yala": {"lat": 6.5411, "lon": 101.2804},
-    "Yasothon": {"lat": 15.7926, "lon": 104.1367}
+    "Bangkok": {"lat": 13.7563, "lon": 100.5018}, "Chiang Mai": {"lat": 18.7904, "lon": 98.9847},
+    "Phuket": {"lat": 7.8804, "lon": 98.3923}, "Khon Kaen": {"lat": 16.4322, "lon": 102.8236},
+    "Nakhon Ratchasima": {"lat": 14.9751, "lon": 102.0987}, "Pattaya": {"lat": 12.9236, "lon": 100.8824},
+    "Hat Yai": {"lat": 7.0084, "lon": 100.4747}, "Ayutthaya": {"lat": 14.3532, "lon": 100.5684},
+    "Ubon Ratchathani": {"lat": 15.2448, "lon": 104.8473}, "Surat Thani": {"lat": 9.1418, "lon": 99.3296}
+    # (สามารถเพิ่มจังหวัดอื่นต่อได้ตรงนี้ครับ)
 }
 
-# --- ส่วน Header และนาฬิกา Real-time ---
-col_head1, col_head2 = st.columns([3, 1])
-
-with col_head1:
-    st.title("🇹🇭 Thailand Weather Dashboard")
-
-with col_head2:
-    # ใช้ st.fragment เพื่อให้เฉพาะส่วนนาฬิกาอัปเดตเองทุก 1 วินาที ไม่กระทบส่วนอื่น
-    @st.fragment(run_every=1)
-    def show_time():
-        now = datetime.now()
-        # บวกเวลาเป็น GMT+7 (ถ้า Server อยู่ต่างประเทศ)
-        # แต่เพื่อความง่ายใช้เวลา Server หรือปรับตามต้องการ
-        # ในที่นี้สมมติ Server เป็น UTC ถ้าอยากได้ไทยให้บวกเพิ่ม (ปรับแก้ตามจริงได้)
-        # วิธีแบบง่าย: แสดงเวลาปัจจุบัน
-        current_time = now.strftime("%H:%M:%S")
-        st.metric(label="🕒 Real-time Clock (BKK Time)", value=current_time)
+# 3. ฟังก์ชันคำนวณข้างขึ้นข้างแรม (Moon Phase)
+def get_moon_phase(date):
+    # คำนวณแบบง่ายโดยนับจากวันที่รู้จัก
+    diff = date - datetime(2000, 1, 6)
+    days = diff.days
+    lunation = 29.53059
+    phase_index = (days % lunation) / lunation
     
-    show_time()
+    if phase_index < 0.03: return "🌑 เดือนดับ (New Moon)"
+    elif phase_index < 0.25: return "🌒 ข้างขึ้น (Waxing Crescent)"
+    elif phase_index < 0.28: return "🌓 จันทร์ครึ่งดวงแรก (First Quarter)"
+    elif phase_index < 0.50: return "🌔 ข้างขึ้นแก่ (Waxing Gibbous)"
+    elif phase_index < 0.53: return "🌕 จันทร์เพ็ญ (Full Moon)"
+    elif phase_index < 0.75: return "🌖 ข้างแรมแก่ (Waning Gibbous)"
+    elif phase_index < 0.78: return "🌗 จันทร์ครึ่งดวงหลัง (Last Quarter)"
+    else: return "🌘 ข้างแรม (Waning Crescent)"
 
-# --- ส่วนควบคุม (Sidebar) ---
-with st.sidebar:
-    st.header("⚙️ Control Panel")
-    selected_city = st.selectbox("📍 เลือกจังหวัด (77 จังหวัด):", list(provinces.keys()))
-    
-    st.write("---")
-    st.write("📅 **เลือกช่วงเวลา**")
-    start_date = st.date_input("วันเริ่มต้น", datetime.now())
-    end_date = st.date_input("วันสิ้นสุด", datetime.now())
-
-coords = provinces[selected_city]
-
-# --- ฟังก์ชันดึงข้อมูล (Cache ไว้ 30 นาที ตามโจทย์) ---
-@st.cache_data(ttl=1800) # ttl=1800 วินาที = 30 นาที
-def get_weather_data(lat, lon, start, end):
+# 4. ฟังก์ชันดึงข้อมูล API (เพิ่มตัวแปรเยอะขึ้น)
+@st.cache_data(ttl=1800)
+def get_weather_full(lat, lon):
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,rain,surface_pressure",
-        "start_date": start.strftime("%Y-%m-%d"),
-        "end_date": end.strftime("%Y-%m-%d"),
-        "timezone": "Asia/Bangkok" # ระบุ Timezone ชัดเจน
+        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m",
+        "hourly": "temperature_2m,relative_humidity_2m,dew_point_2m,uv_index,visibility,wind_speed_10m",
+        "daily": "temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max",
+        "timezone": "Asia/Bangkok"
     }
     response = requests.get(url, params=params)
-    data = response.json()
+    return response.json()
+
+# --- ส่วน UI หลัก ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/1163/1163661.png", width=50)
+    st.header("Weather Settings")
+    selected_city = st.selectbox("เลือกพื้นที่:", list(provinces.keys()))
+
+coords = provinces[selected_city]
+data = get_weather_full(coords['lat'], coords['lon'])
+
+# แปลงข้อมูล
+current = data['current']
+daily = data['daily']
+hourly = data['hourly'] # เอาไว้ทำกราฟ
+
+# วันนี้
+today_max = daily['temperature_2m_max'][0]
+today_min = daily['temperature_2m_min'][0]
+uv_today = daily['uv_index_max'][0]
+sunrise = daily['sunrise'][0][-5:]
+sunset = daily['sunset'][0][-5:]
+
+# คำนวณค่าที่ API ไม่มีโดยตรงในโหมด Current (ดึงจาก Hourly ชั่วโมงปัจจุบัน)
+current_hour_index = datetime.now().hour
+dew_point = hourly['dew_point_2m'][current_hour_index]
+visibility = hourly['visibility'][current_hour_index] / 1000 # แปลง m เป็น km
+moon_phase_text = get_moon_phase(datetime.now())
+
+# --- ส่วนแสดงผลแบบ Weather.com ---
+
+st.title(f"📍 สภาพอากาศ: {selected_city}")
+
+# ส่วน Header ใหญ่ (อุณหภูมิ + สูง/ต่ำ)
+col_main, col_radar = st.columns([1, 1.5])
+
+with col_main:
+    st.markdown(f"""
+        <div class="main-card">
+            <div style="font-size: 24px;">{selected_city}, Thailand</div>
+            <div style="display: flex; align-items: center;">
+                <div class="big-temp">{current['temperature_2m']}°</div>
+                <div style="margin-left: 20px;">
+                    <div class="sub-text">รู้สึกเหมือน {current['apparent_temperature']}°</div>
+                    <div style="font-size: 20px; font-weight: bold;">-- / {today_min}°</div> 
+                    </div>
+            </div>
+            <div style="margin-top: 10px;">
+                สูงสุด: {today_max}° • ต่ำสุด: {today_min}°
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Grid รายละเอียด (4 บรรทัด เหมือนเว็บต้นแบบ)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"""
+            <div class="metric-box">
+                <div class="metric-label">💨 ลม</div>
+                <div class="metric-value">{current['wind_speed_10m']} km/h</div>
+            </div>
+            <br>
+            <div class="metric-box">
+                <div class="metric-label">💧 ความชื้น</div>
+                <div class="metric-value">{current['relative_humidity_2m']}%</div>
+            </div>
+            <br>
+            <div class="metric-box">
+                <div class="metric-label">🌡️ จุดน้ำค้าง</div>
+                <div class="metric-value">{dew_point}°</div>
+            </div>
+             <br>
+            <div class="metric-box">
+                <div class="metric-label">👁️ ทัศนวิสัย</div>
+                <div class="metric-value">{visibility:.1f} km</div>
+            </div>
+        """, unsafe_allow_html=True)
+        
+    with c2:
+        st.markdown(f"""
+            <div class="metric-box">
+                <div class="metric-label">🏋️ ความดัน</div>
+                <div class="metric-value">{current['surface_pressure']} mb</div>
+            </div>
+            <br>
+            <div class="metric-box">
+                <div class="metric-label">☀️ ดัชนี UV</div>
+                <div class="metric-value">{uv_today} ของ 11</div>
+            </div>
+            <br>
+            <div class="metric-box">
+                <div class="metric-label">🌔 ดวงจันทร์</div>
+                <div class="metric-value" style="font-size: 16px;">{moon_phase_text}</div>
+            </div>
+            <br>
+            <div class="metric-box">
+                <div class="metric-label">🌅 ดวงอาทิตย์</div>
+                <div class="metric-value" style="font-size: 16px;">ขึ้น {sunrise} / ตก {sunset}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+# --- ส่วน Radar Map (Embed Windy) ---
+with col_radar:
+    st.subheader("📡 เรดาร์สภาพอากาศ (Live Radar)")
+    # ใช้ Windy.com Widget เพราะสวยและเหมือนเรดาร์จริงที่สุด
+    # ปรับ URL ให้ Focus ไปที่ Lat/Lon ของเมืองที่เลือก
+    windy_url = f"https://embed.windy.com/embed2.html?lat={coords['lat']}&lon={coords['lon']}&detailLat={coords['lat']}&detailLon={coords['lon']}&width=650&height=450&zoom=10&level=surface&overlay=radar&product=radar&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1"
     
-    if 'hourly' not in data:
-        return pd.DataFrame()
+    st.components.v1.iframe(windy_url, height=500, scrolling=False)
 
-    hourly = data['hourly']
-    df = pd.DataFrame({
-        "Time": pd.to_datetime(hourly['time']),
-        "Temperature (°C)": hourly['temperature_2m'],
-        "Humidity (%)": hourly['relative_humidity_2m'],
-        "Wind Speed (km/h)": hourly['wind_speed_10m'],
-        "Rain (mm)": hourly['rain'],
-        "Pressure (hPa)": hourly['surface_pressure']
-    })
-    return df
+# --- ส่วนพยากรณ์รายชั่วโมง (กราฟ) ---
+st.write("---")
+st.subheader("พยากรณ์รายชั่วโมง (24 ชม. ถัดไป)")
+df_hourly = pd.DataFrame({
+    'Time': pd.to_datetime(hourly['time'][:24]),
+    'Temp': hourly['temperature_2m'][:24],
+    'Rain': hourly['uv_index'][:24] # ตัวอย่าง
+})
 
-# --- การแสดงผลหลัก ---
-try:
-    df = get_weather_data(coords['lat'], coords['lon'], start_date, end_date)
-    
-    if df.empty:
-        st.error("ไม่พบข้อมูลในช่วงเวลาที่เลือก")
-    else:
-        # 1. แผนที่แสดงตำแหน่ง (Interactive Map)
-        st.subheader(f"🗺️ ตำแหน่ง: {selected_city}")
-        
-        # สร้าง DataFrame สำหรับ Map จุดเดียว
-        map_df = pd.DataFrame({
-            "lat": [coords['lat']],
-            "lon": [coords['lon']],
-            "city": [selected_city]
-        })
-        
-        # ใช้ Plotly Mapbox เพื่อความสวยงามและ Zoom ไปที่จังหวัดนั้น
-        fig_map = px.scatter_mapbox(
-            map_df, 
-            lat="lat", 
-            lon="lon", 
-            hover_name="city",
-            zoom=8, # ระดับการซูม
-            height=300
-        )
-        fig_map.update_layout(mapbox_style="open-street-map")
-        fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-        st.plotly_chart(fig_map, use_container_width=True)
-
-        # 2. ข้อมูลล่าสุด (Metrics)
-        st.subheader("📊 ข้อมูลสภาพอากาศล่าสุด")
-        latest = df.iloc[-1] # ข้อมูลตัวสุดท้าย (ปัจจุบัน/ล่าสุด)
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("🌡️ อุณหภูมิ", f"{latest['Temperature (°C)']} °C")
-        col2.metric("💧 ความชื้น", f"{latest['Humidity (%)']} %")
-        col3.metric("🌬️ แรงลม", f"{latest['Wind Speed (km/h)']} km/h")
-        col4.metric("🌧️ ปริมาณฝน", f"{latest['Rain (mm)']} mm")
-
-        # 3. กราฟแนวโน้ม
-        st.subheader("📈 แนวโน้มสภาพอากาศ")
-        tab1, tab2, tab3 = st.tabs(["อุณหภูมิ", "ความชื้น", "แรงลม"])
-        
-        with tab1:
-            st.plotly_chart(px.line(df, x="Time", y="Temperature (°C)", title="Temperature Trends", line_shape="spline", color_discrete_sequence=["#FF5252"]), use_container_width=True)
-        with tab2:
-            st.plotly_chart(px.line(df, x="Time", y="Humidity (%)", title="Humidity Trends", line_shape="spline", color_discrete_sequence=["#448AFF"]), use_container_width=True)
-        with tab3:
-            st.plotly_chart(px.line(df, x="Time", y="Wind Speed (km/h)", title="Wind Speed Trends", line_shape="spline", color_discrete_sequence=["#69F0AE"]), use_container_width=True)
-
-        # 4. ปุ่ม Download
-        st.write("---")
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 ดาวน์โหลดข้อมูลเป็น Excel/CSV",
-            data=csv,
-            file_name=f'weather_{selected_city}.csv',
-            mime='text/csv',
-        )
-
-except Exception as e:
-    st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+# กราฟสวยๆ
+fig = px.area(df_hourly, x='Time', y='Temp', title="อุณหภูมิรายชั่วโมง", 
+              color_discrete_sequence=['#FFC107'])
+fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
+st.plotly_chart(fig, use_container_width=True)
