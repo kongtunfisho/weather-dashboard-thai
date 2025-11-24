@@ -176,4 +176,66 @@ df_full = pd.DataFrame({
 })
 df_full.set_index('Time', inplace=True) # ตั้ง Time เป็น Index เพื่อให้ตัดต่อเวลาได้ง่าย
 
-# 3. Logic การกรองข้อมูลตาม
+# 3. Logic การกรองข้อมูลตามช่วงเวลา
+now = datetime.now()
+df_plot = pd.DataFrame() # ตัวแปรสำหรับเก็บข้อมูลที่จะพลอตกราฟ
+
+if "24 ชั่วโมง" in time_range:
+    start_time = now - timedelta(hours=24)
+    df_plot = df_full[start_time:] # ตัดข้อมูลตั้งแต่ 24 ชม. ที่แล้วถึงปัจจุบัน
+    x_axis_format = "%H:%M" # รูปแบบแกน X
+
+elif "7 วัน" in time_range:
+    start_time = now - timedelta(days=7)
+    df_plot = df_full[start_time:]
+    x_axis_format = "%d %b"
+
+elif "30 วัน" in time_range:
+    start_time = now - timedelta(days=30)
+    # Resample เป็นรายวัน (หาค่าเฉลี่ยของแต่ละวัน) เพื่อให้กราฟดูง่าย
+    df_plot = df_full[start_time:].resample('D').mean() 
+    x_axis_format = "%d %b"
+
+elif "3 เดือน" in time_range:
+    start_time = now - timedelta(days=90)
+    # Resample เป็นรายวัน
+    df_plot = df_full[start_time:].resample('D').mean()
+    x_axis_format = "%d %b"
+
+# 4. Logic การเลือกสีและข้อมูลตาม Metric
+y_col = ""
+color_hex = ""
+
+if "อุณหภูมิ" in graph_metric:
+    y_col = "Temperature"
+    color_hex = "#FFC107" # สีเหลืองทอง
+elif "ความชื้น" in graph_metric:
+    y_col = "Humidity"
+    color_hex = "#00B0FF" # สีฟ้าสด
+elif "แรงลม" in graph_metric:
+    y_col = "Wind Speed"
+    color_hex = "#00E676" # สีเขียว
+elif "ความกดอากาศ" in graph_metric:
+    y_col = "Pressure"
+    color_hex = "#FF4081" # สีชมพู
+elif "UV" in graph_metric:
+    y_col = "UV Index"
+    color_hex = "#E040FB" # สีม่วง
+
+# 5. วาดกราฟ
+if not df_plot.empty:
+    fig = px.area(df_plot, x=df_plot.index, y=y_col, 
+                  title=f"แนวโน้ม{graph_metric} - {time_range}",
+                  color_discrete_sequence=[color_hex])
+    
+    # ตกแต่งกราฟให้เข้ากับ Dark Mode
+    fig.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)", 
+        paper_bgcolor="rgba(0,0,0,0)", 
+        font_color="white",
+        xaxis=dict(showgrid=False),
+        yaxis=dict(showgrid=True, gridcolor="#444")
+    )
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("กำลังโหลดข้อมูล หรือไม่มีข้อมูลในช่วงเวลานี้...")
